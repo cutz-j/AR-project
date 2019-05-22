@@ -1,9 +1,9 @@
 # AR-project
 
-- Python 3.6 <br />
+- **Python 3.6** <br />
 RealSense2 SDK (Python Wrapper) <br /> 
 Tensorflow - TinyYOLO
 
-- CPP <br />
+- **CPP** <br />
 OpenGL <br />
 OpenCV
