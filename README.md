@@ -2,8 +2,8 @@
 
 - **Python 3.6** <br />
 RealSense2 SDK (Python Wrapper) <br /> 
-Tensorflow - TinyYOLO
+Tensorflow - TinyYOLO Darknet19
 
 - **CPP** <br />
-OpenGL <br />
-OpenCV
+OpenCV - SolvePnP <br />
+OpenGL - PointCloud Rendering
