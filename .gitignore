@@ -1,2 +1,22 @@
 
 tf_yolo_v3/frozen_darknet_yolov3_model.pb
+*.dll
+*.lib
+*.exe
+darkflow_master/.coveragerc
+*.weights
+*.cfg
+*.pdb
+*.ilk
+*.prototxt
+*.idb
+*.tlog
+*.obj
+*.log
+*.caffemodel
+*.db
+*.ipch
+*.jpg
+*.xml
+PnP/.vs/rs-examples/v15/.suo
+PnP/.vs/PnP/v15/.suo
