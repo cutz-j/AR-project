@@ -66,6 +66,7 @@ int main(int argc, char * argv[]) try
     int class_num;
     int size;
     int detect_num;
+    unsigned char *p_image;
 
     rs2::pipeline pipe;
     rs2::config cfg;
@@ -106,6 +107,7 @@ int main(int argc, char * argv[]) try
         // image 전환 후, 공유메모리 전송 //
         cv::Mat image(cv::Size(width, height), CV_8UC3, (int*)color.get_data(), cv::Mat::AUTO_STEP);
         p_image = image.data;
+        rgb = image.data; // 시각화 color image;
         pMapView_image = (int*)MapViewOfFile(hMapFile_image, FILE_MAP_ALL_ACCESS, 0, 0, 0);
         for (int a = 0; a < size; a++)
             pMapView_image[a] = (int)p_image[a];
@@ -145,39 +147,35 @@ int main(int argc, char * argv[]) try
         if (pMapView_signal[0] == 1) {
             printf("PointCloud Stage\n");
 
-       
-            const double max_angle = 15.0;
-            float rotation_velocity = 0.3f;
-
             // dection info 출력 //
             // window 생성 //
             if (detect_num == 1) {
                 std::cout << "[detect 1: " << detect1.name << " / " << "Prob: " << detect1.score << "]" << std::endl;
-                w = detect1.x_max - detect1.x_min;
-                h = detect1.y_max - detect1.y_min;
+                w = detect1.x_max - detect1.x_min + 10;
+                h = detect1.y_max - detect1.y_min + 10;
             }
             if (detect_num == 2) {
                 std::cout << "[detect 1: " << detect1.name << " / " << "Prob: " << detect1.score << "]" << std::endl;
                 std::cout << "[detect 2: " << detect2.name << " / " << "Prob: " << detect2.score << "]" << std::endl;
-                w = detect1.x_max - detect1.x_min;
-                h = detect1.y_max - detect1.y_min;
+                w = detect1.x_max - detect1.x_min + 10;
+                h = detect1.y_max - detect1.y_min + 10;
             }
 
             ///////// window 생성 ////////
-            window app1(640, 480, "Point Cloud");
+            // OpenGL 시각화 window //
+            // realsense depth data matching //
+            window app1(w, h, "Point Cloud");
             glfw_state app_state;
             register_glfw_callbacks(app1, app_state);
 
-            // OpenGL 시각화 window //
-
-            // realsense depth data matching //
             pc.map_to(color);
             points = pc.calculate(depth);
             app_state.tex.upload(color);
-            draw_text((detect1.x_max + detect1.x_min) / 2, detect1.y_min - 10, detect1.name.c_str());
+            
            
             while (pMapView_signal[0] == 1) {
                 //////////// Rendering ////////////
+                draw_text((detect1.x_max + detect1.x_min) / 2, detect1.y_min - 10, detect1.name.c_str());
                 draw_pointcloud(width, height, app_state, points, &detect1);
                 glfwSwapBuffers(app1.operator GLFWwindow *());
                 glfwPollEvents();

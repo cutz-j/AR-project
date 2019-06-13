@@ -8,6 +8,8 @@
 #define GLFW_INCLUDE_GLU
 #include <GLFW/glfw3.h>
 
+#include <librealsense2/rs.hpp> // Include RealSense Cross Platform API
+
 #include <string>
 #include <sstream>
 #include <iostream>
@@ -16,6 +18,7 @@
 #include <cmath>
 #include <map>
 #include <functional>
+#include <stdlib.h>
 
 #ifndef PI
 const double PI = 3.14159265358979323846;
@@ -26,8 +29,19 @@ const size_t IMU_FRAME_HEIGHT = 720;
 // Basic Data Types         //
 //////////////////////////////
 
-struct float3 { 
-    float x, y, z; 
+struct detect {
+    // detect 정보를 저장하는 구조체 //
+    int x_min, x_max, y_min, y_max;
+    float score;
+    std::string name;
+};
+
+unsigned char *rgb;
+int left, right, top, bottom;
+
+
+struct float3 {
+    float x, y, z;
     float3 operator*(float t)
     {
         return { x * t, y * t, z * t };
@@ -81,6 +95,16 @@ struct rect
     }
 };
 
+int compare (const void *first, const void *second)
+{
+    if (*(float*)first > *(float*)second)
+        return 1;
+    else if (*(float*)first < *(float*)second)
+        return -1;
+    else
+        return 0;
+}
+
 //////////////////////////////
 // Simple font loading code //
 //////////////////////////////
@@ -98,7 +122,7 @@ inline void draw_text(int x, int y, const char * text)
 
 void set_viewport(const rect& r)
 {
-    glViewport( (int)r.x, (int)r.y, (int)r.w, (int)r.h);
+    glViewport((int)r.x, (int)r.y, (int)r.w, (int)r.h);
     glLoadIdentity();
     glMatrixMode(GL_PROJECTION);
     glOrtho(0, r.w, r.h, 0, -1, +1);
@@ -145,7 +169,7 @@ private:
         glRotatef(180, 0.0f, 0.0f, 1.0f);
         glRotatef(-90, 0.0f, 1.0f, 0.0f);
 
-        draw_axes(1,2);
+        draw_axes(1, 2);
 
         draw_circle(1, 0, 0, 0, 1, 0);
         draw_circle(0, 1, 0, 0, 0, 1);
@@ -458,7 +482,7 @@ public:
         }
         else if (auto mf = frame.as<rs2::motion_frame>())
         {
-            _imu_render.render(frame, rect.adjust_ratio({ IMU_FRAME_WIDTH, IMU_FRAME_HEIGHT }));
+            _imu_renderglfw.render(frame, rect.adjust_ratio({ IMU_FRAME_WIDTH, IMU_FRAME_HEIGHT }));
         }
         else if (auto pf = frame.as<rs2::pose_frame>())
         {
@@ -472,7 +496,7 @@ private:
     GLuint          _gl_handle = 0;
     rs2_stream      _stream_type = RS2_STREAM_ANY;
     int             _stream_index{};
-    imu_renderer    _imu_render;
+    imu_renderer    _imu_renderglfw;
     pose_renderer   _pose_render;
 };
 
@@ -578,26 +602,26 @@ public:
     void show(const std::map<int, rs2::frame> frames)
     {
         // Render openGl mosaic of frames
-         if (frames.size())
-         {
-             int cols = int(std::ceil(std::sqrt(frames.size())));
-             int rows = int(std::ceil(frames.size() / static_cast<float>(cols)));
+        if (frames.size())
+        {
+            int cols = int(std::ceil(std::sqrt(frames.size())));
+            int rows = int(std::ceil(frames.size() / static_cast<float>(cols)));
 
-             float view_width = float(_width / cols);
-             float view_height = float(_height / rows);
-             int stream_no =0;
-             for (auto& frame : frames)
-             {
-                 rect viewport_loc{ view_width * (stream_no % cols), view_height * (stream_no / cols), view_width, view_height };
-                 show(frame.second, viewport_loc);
-                 stream_no++;
-             }
-         }
-         else
-         {
-             _main_win.put_text("Connect one or more Intel RealSense devices and rerun the example",
-                 0.4f, 0.5f, { 0.f,0.f, float(_width) , float(_height) });
-         }
+            float view_width = float(_width / cols);
+            float view_height = float(_height / rows);
+            int stream_no = 0;
+            for (auto& frame : frames)
+            {
+                rect viewport_loc{ view_width * (stream_no % cols), view_height * (stream_no / cols), view_width, view_height };
+                show(frame.second, viewport_loc);
+                stream_no++;
+            }
+        }
+        else
+        {
+            _main_win.put_text("Connect one or more Intel RealSense devices and rerun the example",
+                0.4f, 0.5f, { 0.f,0.f, float(_width) , float(_height) });
+        }
     }
 
     operator GLFWwindow*() { return win; }
@@ -753,7 +777,7 @@ struct glfw_state {
 };
 
 // Handles all the OpenGL calls needed to display the point cloud
-void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::points& points)
+void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::points& points, detect *detect_st)
 {
     if (!points)
         return;
@@ -792,15 +816,53 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
     /* this segment actually prints the pointcloud */
     auto vertices = points.get_vertices();              // get vertices
     auto tex_coords = points.get_texture_coordinates(); // and texture coordinates
-    for (int i = 0; i < points.size(); i++)
-    {
-        if (vertices[i].z)
-        {
-            // upload the point and texture coordinates only for points we have depth data for
-            glVertex3fv(vertices[i]);
-            glTexCoord2fv(tex_coords[i]);
+    int row_idx = 0, col_idx = -1;
+
+    // bounding box location //
+    left = detect_st->x_min + 20;
+    right = detect_st->x_max - 20;
+    top = detect_st->y_min + 20;
+    bottom = detect_st->y_max - 20;
+
+    // z arr --> quick sort --> median --> range +- 0.3f //
+    int z_num = 1;
+    float *z_arr = new float[1000000];
+
+    for (int i = 0; i < points.size(); i++) {
+        // z arr --> quick sort --> median --> range +- 0.3f //
+        if (i % 640 == 0) {
+            row_idx = 0;
+            col_idx++;
         }
+        if (row_idx >= left && row_idx < right && col_idx >= top && col_idx < bottom) {
+            z_arr[z_num - 1] = vertices[i].z;
+            z_num++;
+        }
+        row_idx++;
     }
+
+    qsort(z_arr, z_num, sizeof(float), compare);
+    float mid = z_arr[z_num / 2];
+
+    row_idx = 0, col_idx = -1;
+    for (int i = 0; i < points.size(); i++){
+        // upload the point and texture coordinates only for points we have depth data for
+        if (i % 640 == 0) {
+            row_idx = 0;
+            col_idx++;
+        }
+        if (row_idx >= left && row_idx < right && col_idx >= top && col_idx < bottom) {
+            if (vertices[i].z > mid - 0.2f && vertices[i].z < mid + 0.2f) {
+                //glColor3ub(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
+                glVertex3fv(vertices[i]);
+                glTexCoord2fv(tex_coords[i]);
+            }
+        }
+        row_idx++;
+    }
+
+    delete []z_arr;
+    
 
     // OpenGL cleanup
     glEnd();
@@ -847,3 +909,4 @@ void register_glfw_callbacks(window& app, glfw_state& app_state)
         }
     };
 }
+
