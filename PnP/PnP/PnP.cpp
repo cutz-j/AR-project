@@ -35,10 +35,7 @@
 #include <thread>
 #include <atomic>
 
-
-int row = 40;
-int col = 7;
-int size = row * col;
+//////////////////////// 전역 변수 ///////////////////////////
 detect detect1;
 detect detect2; // detect 구조체 2개 선언
 rect rc;
@@ -48,7 +45,7 @@ rs2::pointcloud pc;
 rs2::points points;
 int memSize; // bounding box crop size
 
-int x, y, w, h;
+int x, y, w1, h1, w2, h2;
 
 // 함수 선언 //
 void register_glfw_callbacks(window& app, glfw_state& app_state);
@@ -56,22 +53,26 @@ void register_glfw_callbacks(window& app, glfw_state& app_state);
 
 int main(int argc, char * argv[]) try
 {
-    // 변수 선언 //
+    ///////////// 변수 선언 /////////////////
     HANDLE hMapFile_image;
     HANDLE hMapFile_info;
     HANDLE hMapFile_signal;
     int *pMapView_image;
     float *pMapView_info;
     int *pMapView_signal;
-    int class_num;
-    int size;
-    int detect_num;
+
+    // box 정보 //
+    int class_num, size, detect_num;
+    int row = 40;
+    int col = 7;
+    int size_info = row * col;
     unsigned char *p_image;
 
+    // realsense //
     rs2::pipeline pipe;
     rs2::config cfg;
-    cfg.enable_stream(RS2_STREAM_DEPTH);
-    cfg.enable_stream(RS2_STREAM_COLOR);
+    cfg.enable_stream(RS2_STREAM_DEPTH, 1280, 720, RS2_FORMAT_ANY, 0);
+    cfg.enable_stream(RS2_STREAM_COLOR, 1280, 720, RS2_FORMAT_ANY, 0);
     rs2::colorizer colorizer;
     rs2::frame  depth_texture;
 
@@ -82,6 +83,7 @@ int main(int argc, char * argv[]) try
     auto color = data.get_color_frame();
     auto depth = data.get_depth_frame();
 
+    
     const int width = color.as<rs2::video_frame>().get_width();
     const int height = color.as<rs2::video_frame>().get_height();
 
@@ -89,12 +91,41 @@ int main(int argc, char * argv[]) try
 
     // 공유메모리 초기화 //
     hMapFile_image = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(int) * size, L"IMAGE");
-    hMapFile_info = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(float), L"INFO");
+    hMapFile_info = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(float) * size_info, L"INFO");
     hMapFile_signal = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(int), L"SIGNAL");
     pMapView_signal = (int*)MapViewOfFile(hMapFile_signal, FILE_MAP_ALL_ACCESS, 0, 0, 0);
     pMapView_signal[0] = 0;
 
+
+    // GL window Init //
+    window app(width, height, "Point Cloud1"); // detection point cloud
+    glfw_state app_state;
+    register_glfw_callbacks(app, app_state);
   
+    FT_Library ft;
+    if (FT_Init_FreeType(&ft)) {
+        MessageBox(NULL, TEXT("FreeType 라이브러리 초기화 실패"), TEXT("에러"), MB_OK);
+        return -1;
+    }
+
+    FT_Face face;
+    if (FT_New_Face(ft, "FreeSans.ttf", 0, &face)) {
+        fprintf(stderr, "Could not open font\n");
+        return 1;
+    }
+
+    FT_Set_Pixel_Sizes(face, 0, 32);
+  
+    if (FT_Load_Char(face, 'Z', FT_LOAD_RENDER)) {
+        fprintf(stderr, "Could not load character 'Z'\n");
+        return 1;
+    }
+
+    FT_GlyphSlot g = face->glyph;
+    //attribute vec4 coord;
+    //varying vec2 texcoord;
+
+
 
     // 구동 시작 //
     while (1) {
@@ -143,42 +174,56 @@ int main(int argc, char * argv[]) try
             }
         }
 
-        ///////////////// Point Cloud Stage //////////////////
+        if (detect_num == 1) {
+            std::cout << "[detect 1: " << detect1.name << " / " << "Prob: " << detect1.score << "]" << std::endl;
+            w1 = detect1.x_max - detect1.x_min + 10;
+            h1 = detect1.y_max - detect1.y_min + 10;
+        }
+        if (detect_num == 2) {
+            std::cout << "[detect 1: " << detect1.name << " / " << "Prob: " << detect1.score << "]" << std::endl;
+            std::cout << "[detect 2: " << detect2.name << " / " << "Prob: " << detect2.score << "]" << std::endl;
+            w1 = detect1.x_max - detect1.x_min + 10;
+            h1 = detect1.y_max - detect1.y_min + 10;
+            w2 = detect2.x_max - detect2.x_min + 10;
+            h2 = detect2.y_max - detect2.y_min + 10;
+        }
+
+        ///////// window 생성 ////////
+            // OpenGL 시각화 window //
+            // realsense depth data matching //
+
+        pc.map_to(color);
+        points = pc.calculate(depth);
+        app_state.tex.upload(color);
+        //app_state.tex.upload(depth_texture); // depth color matching (실 영상이 아닌 뎁스 컬러)
+        
+
+        if (detect_num == 1)
+            draw_pointcloud(width, height, app_state, points, &detect1);
+        if (detect_num == 2)
+            draw_pointcloud(width, height, app_state, points, &detect1, &detect2);
+
+        glPopMatrix();
+        glfwSwapBuffers(app.operator GLFWwindow *());
+        glfwPollEvents();
+
+
+        Sleep(1);
+
+        ///////////////// Point Cloud PnP Stage //////////////////
         if (pMapView_signal[0] == 1) {
-            printf("PointCloud Stage\n");
+            printf("PointCloud PnP Stage\n");
 
             // dection info 출력 //
             // window 생성 //
-            if (detect_num == 1) {
-                std::cout << "[detect 1: " << detect1.name << " / " << "Prob: " << detect1.score << "]" << std::endl;
-                w = detect1.x_max - detect1.x_min + 10;
-                h = detect1.y_max - detect1.y_min + 10;
-            }
-            if (detect_num == 2) {
-                std::cout << "[detect 1: " << detect1.name << " / " << "Prob: " << detect1.score << "]" << std::endl;
-                std::cout << "[detect 2: " << detect2.name << " / " << "Prob: " << detect2.score << "]" << std::endl;
-                w = detect1.x_max - detect1.x_min + 10;
-                h = detect1.y_max - detect1.y_min + 10;
-            }
+            
 
-            ///////// window 생성 ////////
-            // OpenGL 시각화 window //
-            // realsense depth data matching //
-            window app1(w, h, "Point Cloud");
-            glfw_state app_state;
-            register_glfw_callbacks(app1, app_state);
-
-            pc.map_to(color);
-            points = pc.calculate(depth);
-            app_state.tex.upload(color);
+            
             
            
             while (pMapView_signal[0] == 1) {
                 //////////// Rendering ////////////
-                draw_text((detect1.x_max + detect1.x_min) / 2, detect1.y_min - 10, detect1.name.c_str());
-                draw_pointcloud(width, height, app_state, points, &detect1);
-                glfwSwapBuffers(app1.operator GLFWwindow *());
-                glfwPollEvents();
+                
             }
         }
     }
@@ -186,6 +231,7 @@ int main(int argc, char * argv[]) try
 	_getch();
 	UnmapViewOfFile(hMapFile_image);
 	UnmapViewOfFile(hMapFile_info);
+    UnmapViewOfFile(hMapFile_signal);
 
 	return 0;
 }

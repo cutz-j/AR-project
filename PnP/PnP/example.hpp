@@ -7,7 +7,6 @@
 
 #define GLFW_INCLUDE_GLU
 #include <GLFW/glfw3.h>
-
 #include <librealsense2/rs.hpp> // Include RealSense Cross Platform API
 
 #include <string>
@@ -19,6 +18,9 @@
 #include <map>
 #include <functional>
 #include <stdlib.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <freetype/freetype.h>
 
 #ifndef PI
 const double PI = 3.14159265358979323846;
@@ -37,8 +39,24 @@ struct detect {
 };
 
 unsigned char *rgb;
-int left, right, top, bottom;
+int left1, right1, top1, bottom1;
+int left2, right2, top2, bottom2;
 
+
+int DrawGLScene(GLvoid)
+{
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glLoadIdentity();
+    glTranslatef(0.0f, 0.0f, -4.0f);
+    glBegin(GL_QUADS);
+    glColor3f(0.0f, 0.0f, 0.0f); glVertex2f(-1.0f, -1.0f);
+    glColor3f(1.0f, 0.0f, 0.0f); glVertex2f(1.0f, -1.0f);
+    glColor3f(0.0f, 1.0f, 0.0f); glVertex2f(1.0f, 1.0f);
+    glColor3f(0.0f, 0.0f, 1.0f); glVertex2f(-1.0f, 1.0f);
+    glEnd();
+
+    return TRUE;
+}
 
 struct float3 {
     float x, y, z;
@@ -105,11 +123,16 @@ int compare (const void *first, const void *second)
         return 0;
 }
 
+
 //////////////////////////////
 // Simple font loading code //
 //////////////////////////////
 
 #include "../third-party/stb_easy_font.h"
+
+inline int get_text_width(const char * text){
+    return stb_easy_font_width((char *)text);
+}
 
 inline void draw_text(int x, int y, const char * text)
 {
@@ -810,6 +833,7 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, tex_border_color);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F); // GL_CLAMP_TO_EDGE
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F); // GL_CLAMP_TO_EDGE
+
     glBegin(GL_POINTS);
 
 
@@ -819,40 +843,43 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
     int row_idx = 0, col_idx = -1;
 
     // bounding box location //
-    left = detect_st->x_min + 20;
-    right = detect_st->x_max - 20;
-    top = detect_st->y_min + 20;
-    bottom = detect_st->y_max - 20;
+    left1 = detect_st->x_min + 20;
+    right1 = detect_st->x_max - 20;
+    top1 = detect_st->y_min + 20;
+    bottom1 = detect_st->y_max - 20;
 
     // z arr --> quick sort --> median --> range +- 0.3f //
-    int z_num = 1;
-    float *z_arr = new float[1000000];
+    int z_num1 = 1;
+    float *z_arr1 = new float[1000000];
 
     for (int i = 0; i < points.size(); i++) {
         // z arr --> quick sort --> median --> range +- 0.3f //
-        if (i % 640 == 0) {
+        if (i % 1280 == 0) {
             row_idx = 0;
             col_idx++;
         }
-        if (row_idx >= left && row_idx < right && col_idx >= top && col_idx < bottom) {
-            z_arr[z_num - 1] = vertices[i].z;
-            z_num++;
+        if (row_idx >= left1 && row_idx < right1 && col_idx >= top1 && col_idx < bottom1) {
+            z_arr1[z_num1 - 1] = vertices[i].z;
+            z_num1++;
         }
         row_idx++;
     }
 
-    qsort(z_arr, z_num, sizeof(float), compare);
-    float mid = z_arr[z_num / 2];
+    qsort(z_arr1, z_num1, sizeof(float), compare);
+    float mid1 = z_arr1[z_num1 / 2];
 
     row_idx = 0, col_idx = -1;
+
     for (int i = 0; i < points.size(); i++){
         // upload the point and texture coordinates only for points we have depth data for
-        if (i % 640 == 0) {
+        if (i % 1280 == 0) {
             row_idx = 0;
             col_idx++;
         }
-        if (row_idx >= left && row_idx < right && col_idx >= top && col_idx < bottom) {
-            if (vertices[i].z > mid - 0.2f && vertices[i].z < mid + 0.2f) {
+        if (row_idx >= left1 && row_idx < right1 && col_idx >= top1 && col_idx < bottom1) {
+            // bounding box 내부에서만 추출 //
+            if (vertices[i].z > mid1 - 0.3f && vertices[i].z < mid1 + 0.1f) {
+                // 중앙 z 값 기준으로 range만 추출 //
                 //glColor3ub(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
                 glVertex3fv(vertices[i]);
                 glTexCoord2fv(tex_coords[i]);
@@ -861,11 +888,148 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
         row_idx++;
     }
 
-    delete []z_arr;
-    
+    int x1 = (left1 + right1) / 2;
+    int y1 = top1 - 5;
+
+    delete[]z_arr1;
+
 
     // OpenGL cleanup
+    glFlush();
     glEnd();
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glPopAttrib();
+}
+
+void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::points& points, detect *detect_st, detect *detect_st2)
+{
+    if (!points)
+        return;
+
+    // OpenGL commands that prep screen for the pointcloud
+    glLoadIdentity();
+    glPushAttrib(GL_ALL_ATTRIB_BITS);
+
+    glClearColor(153.f / 255, 153.f / 255, 153.f / 255, 1);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    gluPerspective(60, width / height, 0.01f, 10.0f);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    gluLookAt(0, 0, 0, 0, 0, 1, 0, -1, 0);
+
+    glTranslatef(0, 0, +0.5f + app_state.offset_y*0.05f);
+    glRotated(app_state.pitch, 1, 0, 0);
+    glRotated(app_state.yaw, 0, 1, 0);
+    glTranslatef(0, 0, -0.5f);
+
+    glPointSize(width / 640);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, app_state.tex.get_gl_handle());
+    float tex_border_color[] = { 0.8f, 0.8f, 0.8f, 0.8f };
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, tex_border_color);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F); // GL_CLAMP_TO_EDGE
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F); // GL_CLAMP_TO_EDGE
+
+    glBegin(GL_POINTS);
+
+
+    /* this segment actually prints the pointcloud */
+    auto vertices = points.get_vertices();              // get vertices
+    auto tex_coords = points.get_texture_coordinates(); // and texture coordinates
+    int row_idx = 0, col_idx = -1;
+
+    // bounding box location //
+    left1 = detect_st->x_min + 20;
+    right1 = detect_st->x_max - 20;
+    top1 = detect_st->y_min + 20;
+    bottom1 = detect_st->y_max - 20;
+
+    left2 = detect_st2->x_min + 20;
+    right2 = detect_st2->x_max - 20;
+    top2 = detect_st2->y_min + 20;
+    bottom2 = detect_st2->y_max - 20;
+
+
+    // z arr --> quick sort --> median --> range +- 0.3f //
+    int z_num1 = 1;
+    int z_num2 = 1;
+    float *z_arr1 = new float[1000000];
+    float *z_arr2 = new float[1000000];
+
+    for (int i = 0; i < points.size(); i++) {
+        // z arr --> quick sort --> median --> range +- 0.3f //
+        if (i % 1280 == 0) {
+            row_idx = 0;
+            col_idx++;
+        }
+        if (row_idx >= left1 && row_idx < right1 && col_idx >= top1 && col_idx < bottom1) {
+            z_arr1[z_num1 - 1] = vertices[i].z;
+            z_num1++;
+        }
+        if (row_idx >= left2 && row_idx < right2 && col_idx >= top2 && col_idx < bottom2) {
+            z_arr2[z_num2 - 1] = vertices[i].z;
+            z_num2++;
+        }
+        row_idx++;
+    }
+
+    qsort(z_arr1, z_num1, sizeof(float), compare);
+    qsort(z_arr2, z_num2, sizeof(float), compare);
+    float mid1 = z_arr1[z_num1 / 2];
+    float mid2 = z_arr2[z_num2 / 2];
+
+    row_idx = 0, col_idx = -1;
+
+    for (int i = 0; i < points.size(); i++) {
+        int switch_num = 0;
+        // upload the point and texture coordinates only for points we have depth data for
+        if (i % 1280 == 0) {
+            row_idx = 0;
+            col_idx++;
+        }
+        if (row_idx >= left1 && row_idx < right1 && col_idx >= top1 && col_idx < bottom1) {
+            if (vertices[i].z > mid1 - 0.3f && vertices[i].z < mid1 + 0.1f) {
+                //glColor3ub(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
+                glVertex3fv(vertices[i]);
+                glTexCoord2fv(tex_coords[i]);
+                switch_num = 1;
+            }
+        }
+        if (row_idx >= left2 && row_idx < right2 && col_idx >= top2 && col_idx < bottom2) {
+            if (vertices[i].z > mid2 - 0.3f && vertices[i].z < mid2 + 0.1f) {
+                //glColor3ub(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
+                if (switch_num == 0) {
+                    glVertex3fv(vertices[i]);
+                    glTexCoord2fv(tex_coords[i]);
+                }
+            }
+        }
+        row_idx++;
+    }
+
+    ///////////// text drawing //////////////
+    int x1 = (left1 + right1) / 2;
+    int x2 = (left2 + right2) / 2;
+    int y1 = top1 - 5;
+    int y2 = top2 - 5;
+
+    
+
+    delete[] z_arr1;
+    delete[] z_arr2;
+
+    // OpenGL cleanup
+    glFlush();
+    glEnd();
+
     glPopMatrix();
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
@@ -909,4 +1073,3 @@ void register_glfw_callbacks(window& app, glfw_state& app_state)
         }
     };
 }
-
