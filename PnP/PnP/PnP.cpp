@@ -3,7 +3,6 @@
 #include <librealsense2/rs.hpp>
 #include <algorithm>
 
-
 // OpenGL //
 #include <GL/glew.h>
 #include <GL/wglew.h>
@@ -24,6 +23,7 @@
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/opencv.hpp"
 
+
 // lib //
 #include <string>
 #include <sstream>
@@ -39,16 +39,17 @@
 detect detect1;
 detect detect2; // detect 구조체 2개 선언
 rect rc;
+int keyArr[350];
+int color_switch = 0;
 
 // pointCloud 변수 선언 //
 rs2::pointcloud pc;
 rs2::points points;
 int memSize; // bounding box crop size
 
-int x, y, w1, h1, w2, h2;
-
 // 함수 선언 //
 void register_glfw_callbacks(window& app, glfw_state& app_state);
+static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 
 
 int main(int argc, char * argv[]) try
@@ -82,7 +83,6 @@ int main(int argc, char * argv[]) try
     auto data = pipe.wait_for_frames();
     auto color = data.get_color_frame();
     auto depth = data.get_depth_frame();
-
     
     const int width = color.as<rs2::video_frame>().get_width();
     const int height = color.as<rs2::video_frame>().get_height();
@@ -98,34 +98,10 @@ int main(int argc, char * argv[]) try
 
 
     // GL window Init //
-    window app(width, height, "Point Cloud1"); // detection point cloud
+    window app(width, height, "Point Cloud"); // detection point cloud
     glfw_state app_state;
     register_glfw_callbacks(app, app_state);
-  
-    FT_Library ft;
-    if (FT_Init_FreeType(&ft)) {
-        MessageBox(NULL, TEXT("FreeType 라이브러리 초기화 실패"), TEXT("에러"), MB_OK);
-        return -1;
-    }
-
-    FT_Face face;
-    if (FT_New_Face(ft, "FreeSans.ttf", 0, &face)) {
-        fprintf(stderr, "Could not open font\n");
-        return 1;
-    }
-
-    FT_Set_Pixel_Sizes(face, 0, 32);
-  
-    if (FT_Load_Char(face, 'Z', FT_LOAD_RENDER)) {
-        fprintf(stderr, "Could not load character 'Z'\n");
-        return 1;
-    }
-
-    FT_GlyphSlot g = face->glyph;
-    //attribute vec4 coord;
-    //varying vec2 texcoord;
-
-
+    glfwSetKeyCallback(app.operator GLFWwindow *(), KeyCallback);
 
     // 구동 시작 //
     while (1) {
@@ -176,16 +152,10 @@ int main(int argc, char * argv[]) try
 
         if (detect_num == 1) {
             std::cout << "[detect 1: " << detect1.name << " / " << "Prob: " << detect1.score << "]" << std::endl;
-            w1 = detect1.x_max - detect1.x_min + 10;
-            h1 = detect1.y_max - detect1.y_min + 10;
         }
         if (detect_num == 2) {
             std::cout << "[detect 1: " << detect1.name << " / " << "Prob: " << detect1.score << "]" << std::endl;
             std::cout << "[detect 2: " << detect2.name << " / " << "Prob: " << detect2.score << "]" << std::endl;
-            w1 = detect1.x_max - detect1.x_min + 10;
-            h1 = detect1.y_max - detect1.y_min + 10;
-            w2 = detect2.x_max - detect2.x_min + 10;
-            h2 = detect2.y_max - detect2.y_min + 10;
         }
 
         ///////// window 생성 ////////
@@ -194,8 +164,11 @@ int main(int argc, char * argv[]) try
 
         pc.map_to(color);
         points = pc.calculate(depth);
-        app_state.tex.upload(color);
-        //app_state.tex.upload(depth_texture); // depth color matching (실 영상이 아닌 뎁스 컬러)
+        // Key r (Image --> color) : Key t (color --> image) //
+        if (color_switch == 0)
+            app_state.tex.upload(color);
+        if (color_switch == 1)
+            app_state.tex.upload(depth_texture); // depth color matching (실 영상이 아닌 뎁스 컬러)
         
 
         if (detect_num == 1)
@@ -207,24 +180,67 @@ int main(int argc, char * argv[]) try
         glfwSwapBuffers(app.operator GLFWwindow *());
         glfwPollEvents();
 
-
         Sleep(1);
 
         ///////////////// Point Cloud PnP Stage //////////////////
         if (pMapView_signal[0] == 1) {
-            printf("PointCloud PnP Stage\n");
 
+            // openGL 출력 읽기 //
+            //unsigned char *pixels = new unsigned char[sizeof(unsigned char)* (cw1) * (ch1) * 4];
+            //cv::Mat pc_image(cv::Size(cw1, ch1), CV_8UC4, pixels, cv::Mat::AUTO_STEP); // pointcloud image capture
+            //cv::Mat result; // 상하대칭변환
+
+            //// pointcloud GL Capture --> opencv mat ////
+            IplImage *mask = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 1);
+            IplImage *img_bg;
+            IplImage *img_gl = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 3);
+            glReadPixels(0, 0, 1280, 720, GL_BGR_EXT, GL_UNSIGNED_BYTE, img_gl->imageData);
+            cvFlip(img_gl, img_gl);
+            cvCvtColor(img_gl, mask, CV_RGB2GRAY);
+            cvThreshold(mask, mask, 1, 255, CV_THRESH_BINARY);
+
+            printf("PointCloud PnP Stage\n");
+            glfwDestroyWindow(app.operator GLFWwindow *());
             // dection info 출력 //
             // window 생성 //
             
+            // chess board //
+            int row = 9;
+            int col = 7;
+            cv::Size boardSize(row, col);
+            std::vector<cv::Point2f> cornerPoints;
 
-            
-            
-           
+            /// Straming ///
+            cv::VideoCapture cam(1);
+            cam.set(CV_CAP_PROP_FRAME_WIDTH, 1280);
+            cam.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
+            cam.set(CV_CAP_PROP_BUFFERSIZE, 3);
+
+            cv::Mat cimage; // streaming
+
             while (pMapView_signal[0] == 1) {
-                //////////// Rendering ////////////
+                //////////// PnP ////////////
+                // realsense 영상 stream //
+                cam.read(cimage);
+                img_bg = new IplImage(cimage);
+                cvCopy(img_gl, img_bg, mask);
+
                 
+                //bool patternFound = cv::findChessboardCorners(cimage, boardSize, cornerPoints);
+                //cv::drawChessboardCorners(cimage, boardSize, cv::Mat(cornerPoints), patternFound);
+                cam.grab();
+                cvShowImage("cam", img_bg);
+                int key = cv::waitKey(1);
+
+                
+
+                
+
             }
+            cvReleaseImage(&mask);
+            cvReleaseImage(&img_gl);
+            cvReleaseImage(&img_bg);
+            
         }
     }
     
@@ -242,4 +258,21 @@ catch (const rs2::error & e) {
 catch (const std::exception & e) {
 	std::cerr << e.what() << std::endl;
 	return EXIT_FAILURE;
+}
+
+static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    keyArr[key] = action;
+    //printf("%d", key);
+    switch (key) {
+        // r: image --> color // t: color --> image;
+    case 82:
+        color_switch = 1;
+        break;
+
+    case 84:
+        color_switch = 0;
+        break;
+        
+    }
+
 }

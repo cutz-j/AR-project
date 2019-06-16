@@ -18,9 +18,6 @@
 #include <map>
 #include <functional>
 #include <stdlib.h>
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include <freetype/freetype.h>
 
 #ifndef PI
 const double PI = 3.14159265358979323846;
@@ -41,6 +38,11 @@ struct detect {
 unsigned char *rgb;
 int left1, right1, top1, bottom1;
 int left2, right2, top2, bottom2;
+int cx1, cy1, cx2, cy2, cw1, ch1, cw2, ch2;
+
+void init_ft(void) {
+    char *filename = "c:/Windows/Font/Arial.ttf";
+}
 
 
 int DrawGLScene(GLvoid)
@@ -809,8 +811,10 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
     glLoadIdentity();
     glPushAttrib(GL_ALL_ATTRIB_BITS);
 
-    glClearColor(153.f / 255, 153.f / 255, 153.f / 255, 1);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClearDepth(1);
     glClear(GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT);
 
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
@@ -851,6 +855,10 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
     // z arr --> quick sort --> median --> range +- 0.3f //
     int z_num1 = 1;
     float *z_arr1 = new float[1000000];
+    int row_min = 999999999;
+    int row_max = 0;
+    int col_min = 999999999;
+    int col_max = 0;
 
     for (int i = 0; i < points.size(); i++) {
         // z arr --> quick sort --> median --> range +- 0.3f //
@@ -883,13 +891,25 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
                 //glColor3ub(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
                 glVertex3fv(vertices[i]);
                 glTexCoord2fv(tex_coords[i]);
+                if (row_idx <= row_min)
+                    row_min = row_idx;
+                if (row_idx >= row_max)
+                    row_max = row_idx;
+                if (col_idx <= col_min)
+                    col_min = col_idx;
+                if (col_idx >= col_max)
+                    col_max = col_idx;
+               
             }
         }
         row_idx++;
     }
 
-    int x1 = (left1 + right1) / 2;
-    int y1 = top1 - 5;
+    cx1 = row_min;
+    cy1 = col_min;
+    cw1 = row_max - row_min;
+    ch1 = col_max - col_min;
+
 
     delete[]z_arr1;
 
@@ -912,7 +932,8 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
     glLoadIdentity();
     glPushAttrib(GL_ALL_ATTRIB_BITS);
 
-    glClearColor(153.f / 255, 153.f / 255, 153.f / 255, 1);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClearDepth(1);
     glClear(GL_DEPTH_BUFFER_BIT);
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -964,6 +985,11 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
     float *z_arr1 = new float[1000000];
     float *z_arr2 = new float[1000000];
 
+    int row_min = 999999999;
+    int row_max = 0;
+    int col_min = 999999999;
+    int col_max = 0;
+
     for (int i = 0; i < points.size(); i++) {
         // z arr --> quick sort --> median --> range +- 0.3f //
         if (i % 1280 == 0) {
@@ -1000,6 +1026,14 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
                 //glColor3ub(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]);
                 glVertex3fv(vertices[i]);
                 glTexCoord2fv(tex_coords[i]);
+                if (row_idx <= row_min)
+                    row_min = row_idx;
+                if (row_idx >= row_max)
+                    row_max = row_idx;
+                if (col_idx <= col_min)
+                    col_min = col_idx;
+                if (col_idx >= col_max)
+                    col_max = col_idx;
                 switch_num = 1;
             }
         }
@@ -1009,19 +1043,18 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
                 if (switch_num == 0) {
                     glVertex3fv(vertices[i]);
                     glTexCoord2fv(tex_coords[i]);
+                    
                 }
             }
         }
         row_idx++;
     }
 
-    ///////////// text drawing //////////////
-    int x1 = (left1 + right1) / 2;
-    int x2 = (left2 + right2) / 2;
-    int y1 = top1 - 5;
-    int y2 = top2 - 5;
+    cx1 = row_min;
+    cy1 = col_min;
+    cw1 = row_max - row_min;
+    ch1 = col_max - col_min;
 
-    
 
     delete[] z_arr1;
     delete[] z_arr2;
