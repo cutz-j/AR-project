@@ -22,7 +22,7 @@
 #include "opencv2/calib3d/calib3d.hpp"
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/opencv.hpp"
-
+#include "MarkerDetection.h"
 
 // lib //
 #include <string>
@@ -35,12 +35,16 @@
 #include <thread>
 #include <atomic>
 
+#define MARKER_WIDTH	0.146f
+#define MARKER_HEIGHT	0.146f
+
 //////////////////////// 전역 변수 ///////////////////////////
 detect detect1;
 detect detect2; // detect 구조체 2개 선언
 rect rc;
 int keyArr[350];
 int color_switch = 0;
+
 
 // pointCloud 변수 선언 //
 rs2::pointcloud pc;
@@ -50,7 +54,7 @@ int memSize; // bounding box crop size
 // 함수 선언 //
 void register_glfw_callbacks(window& app, glfw_state& app_state);
 static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
-
+void PrintMarkerInfo(const vector<sMarkerInfo> &markers);
 
 int main(int argc, char * argv[]) try
 {
@@ -199,42 +203,45 @@ int main(int argc, char * argv[]) try
             cvCvtColor(img_gl, mask, CV_RGB2GRAY);
             cvThreshold(mask, mask, 1, 255, CV_THRESH_BINARY);
 
-            printf("PointCloud PnP Stage\n");
+            printf("PointCloud Augmentation Stage\n");
             glfwDestroyWindow(app.operator GLFWwindow *());
             // dection info 출력 //
             // window 생성 //
-            
-            // chess board //
-            int row = 9;
-            int col = 7;
-            cv::Size boardSize(row, col);
-            std::vector<cv::Point2f> cornerPoints;
+      
 
-            /// Straming ///
-            cv::VideoCapture cam(1);
-            cam.set(CV_CAP_PROP_FRAME_WIDTH, 1280);
-            cam.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
-            cam.set(CV_CAP_PROP_BUFFERSIZE, 3);
-
+            /// Streaming ///
             cv::Mat cimage; // streaming
+            cvInitFont(&_font, CV_FONT_HERSHEY_SIMPLEX, .4, .4, 0, 1, 8);
+            _marker_width = MARKER_WIDTH;
+            _marker_height = MARKER_HEIGHT;
+            LoadCalibParams(cvSize(1280, 720));
 
             while (pMapView_signal[0] == 1) {
                 //////////// PnP ////////////
                 // realsense 영상 stream //
-                cam.read(cimage);
-                img_bg = new IplImage(cimage);
-                cvCopy(img_gl, img_bg, mask);
-
+                data = pipe.wait_for_frames();
+                color = data.get_color_frame();
+                cv::Mat pnp_image(cv::Size(1280, 720), CV_8UC3, (int*)color.get_data(), cv::Mat::AUTO_STEP);
+                cv::cvtColor(pnp_image, pnp_image, CV_RGB2BGR);
+                img_bg = new IplImage(pnp_image);
                 
-                //bool patternFound = cv::findChessboardCorners(cimage, boardSize, cornerPoints);
-                //cv::drawChessboardCorners(cimage, boardSize, cv::Mat(cornerPoints), patternFound);
-                cam.grab();
-                cvShowImage("cam", img_bg);
+                IplImage *und = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 3);
+                IplImage *dst = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 3);
+
+                // 왜곡 보정 : calibration //
+                Undistort(img_bg, und);
+
+                // marker detection //
+                cvCopy(und, dst, 0);
+                MarkerRecog(und, dst);
+
+                // 인식 마커 출력 //
+                PrintMarkerInfo(_markers);
+                cvShowImage("OpenGlDraw", dst);
+                
                 int key = cv::waitKey(1);
-
-                
-
-                
+                //cvReleaseImage(&dst);
+                cvReleaseImage(&und);
 
             }
             cvReleaseImage(&mask);
@@ -275,4 +282,24 @@ static void KeyCallback(GLFWwindow* window, int key, int scancode, int action, i
         
     }
 
+}
+
+void PrintMarkerInfo(const vector<sMarkerInfo> &markers)
+{
+    string out_text;
+
+    for (unsigned int i = 0; i < markers.size(); ++i) {
+        const sMarkerInfo &mi = markers[i];
+        char text[1024];
+        sprintf(text,
+            "Marker ID          = %d\r\n"
+            "Rotation Vector    = %8.3f, %8.3f, %8.3f \r\n"
+            "Translation Vector = %8.3f, %8.3f, %8.3f \r\n"
+            "\r\n",
+            (int)mi.ID,
+            (double)mi.rotation[0], (double)mi.rotation[1], (double)mi.rotation[2],
+            (double)mi.translation[0], (double)mi.translation[1], (double)mi.translation[2]);
+
+        out_text += text;
+    }
 }
