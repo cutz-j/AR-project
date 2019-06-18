@@ -25,6 +25,11 @@ struct sMarkerInfo
 vector<sMarkerInfo> _markers;
 float _marker_width;
 float _marker_height;
+CvFont _font;
+CvMat *transform_matrix;
+const double CV_AR_DISP_SCALE_FIT = 0.0;
+const int CV_AR_MARKER_SIZE = 200;
+
 
 void FindMarkerInContour (CvSeq *contours, CvMemStorage *storage, int level);
 bool CheckRectCenter(CvSeq *seq);
@@ -39,7 +44,9 @@ int  CalcMarkerID (double code_matrix[6][6]);
 void FindMarkerPos3d (sMarkerInfo *marker);
 void DrawMarkerInfo (sMarkerInfo *marker, IplImage *dst);
 void ShowMarkerCode (CvSize &size, double code_matrix[6][6]);
-CvFont _font; 
+void cv_ARaugmentImage(IplImage* display, IplImage* img, CvPoint2D32f srcQuad[4], double scale);
+
+
 
 void DrawMarkerRect(IplImage *img, sMarkerInfo &mi, CvScalar color)
 {
@@ -289,7 +296,6 @@ void GetMarkerCode(IplImage *src, IplImage *dst)
                 // 원본 마커 코드
                 cvNamedWindow("Marker Image Org", CV_WINDOW_AUTOSIZE);
                 cvShowImage("Marker Image Org", img_marker);
-                
                 ShowMarkerCode(cvSize(60, 60), code_matrix);
             }
         }
@@ -305,7 +311,7 @@ void ExtractMarkerImage(IplImage *src, IplImage *dst, sMarkerInfo &mi)
 
     const float ignoring_margin = 0.f;	// 원본 이미지로부터 마커 이미지로 복사하면서 무시할 테두리의 영역
 
-    CvMat *transform_matrix = cvCreateMat(3, 3, CV_32FC1);
+    transform_matrix = cvCreateMat(3, 3, CV_32FC1);
 
     if (mi.level % 2 == 0) {
         // 추출한 마커를 저장할 이미지 상의 좌표
@@ -333,6 +339,8 @@ void ExtractMarkerImage(IplImage *src, IplImage *dst, sMarkerInfo &mi)
 
     // 소스 이미지 상의 마커를 마커 이미지로 복사한다.
     cvWarpPerspective(src, dst, transform_matrix);
+
+    
 
     if (mi.level % 2 == 0) {
         cvNot(dst, dst);
@@ -507,11 +515,11 @@ void FindMarkerPos3d(sMarkerInfo *marker)
     CvMat object_points = cvMat(4, 3, CV_32FC1, &object_xyz[0][0]);
     CvMat image_points = cvMat(4, 2, CV_32FC1, &image_xy[0][0]);
 
-    CvMat _intrinsic_matrix = intrinsic_matrix;
-    CvMat _distortion_coeffs = distortion_coeffs;
+    CvMat *_intrinsic_matrix = new CvMat(intrinsic_matrix);
+    CvMat *_distortion_coeffs = new CvMat(distortion_coeffs);
 
     // 3차원 공간에서 마커의 위치와 방위를 찾는다.
-    cvFindExtrinsicCameraParams2(&object_points, &image_points,&_intrinsic_matrix, &_distortion_coeffs, &rotation, &translation);
+    cvFindExtrinsicCameraParams2(&object_points, &image_points,_intrinsic_matrix, _distortion_coeffs, &rotation, &translation);
 }
 
 void ShowMarkerCode(CvSize &size, double code_matrix[6][6])
@@ -534,8 +542,8 @@ void ShowMarkerCode(CvSize &size, double code_matrix[6][6])
         }
     }
 
-    cvNamedWindow("Marker Image", CV_WINDOW_AUTOSIZE);
-    cvShowImage("Marker Image", img);
+    //cvNamedWindow("Marker Image", CV_WINDOW_AUTOSIZE);
+    //cvShowImage("Marker Image", img);
 
     cvReleaseImage(&img);
 }
@@ -574,10 +582,6 @@ void DrawMarkerInfo(sMarkerInfo *marker, IplImage *dst)
     //cv::projectPoints(object_points, rotationMatrix, translationVector, intrinsic_matrix, distortion_coeffs, image_points);
     cvProjectPoints2(&object_points, &rotation, &translation, _intrinsic_matrix, _distortion_coeffs, &image_points);
 
-    // 2차원으로 프로젝션된 좌표를 그린다.
-    cvLine(dst, cvPoint(cvRound(image_xy[0][0]), cvRound(image_xy[0][1])), cvPoint(cvRound(image_xy[1][0]), cvRound(image_xy[1][1])), CV_RGB(255, 0, 0), 2);
-    cvLine(dst, cvPoint(cvRound(image_xy[0][0]), cvRound(image_xy[0][1])), cvPoint(cvRound(image_xy[2][0]), cvRound(image_xy[2][1])), CV_RGB(0, 255, 0), 2);
-    cvLine(dst, cvPoint(cvRound(image_xy[0][0]), cvRound(image_xy[0][1])), cvPoint(cvRound(image_xy[3][0]), cvRound(image_xy[3][1])), CV_RGB(0, 0, 255), 2);
 
     // 마커의 ID를 표시한다.
     char buff[256];
@@ -586,3 +590,73 @@ void DrawMarkerInfo(sMarkerInfo *marker, IplImage *dst)
 }
 
 #endif
+
+void cv_ARaugmentImage(IplImage* display, IplImage* img, CvPoint2D32f srcQuad[4], double scale)
+{
+    IplImage* cpy_img = cvCreateImage(cvSize(img->width, img->height), 8, 3);	// To hold Camera Image Mask 
+    IplImage* neg_img = cvCreateImage(cvSize(img->width, img->height), 8, 3);	// To hold Marker Image Mask
+    IplImage* blank;						// to assist marker pass
+    IplImage temp;
+
+    blank = cvCreateImage(cvSize(display->width, display->height), 8, 3);
+    cvZero(blank);
+    cvNot(blank, blank);
+
+    CvPoint2D32f dispQuad[4];
+    CvMat* disp_warp_matrix = cvCreateMat(3, 3, CV_32FC1);    // Warp matrix to store perspective data required for display
+
+    if (scale == CV_AR_DISP_SCALE_FIT)
+    {
+        dispQuad[0].x = 0;				// Positions of Display image (not yet transposed)
+        dispQuad[0].y = 0;
+
+        dispQuad[1].x = display->width;
+        dispQuad[1].y = 0;
+
+        dispQuad[2].x = display->width;
+        dispQuad[2].y = display->height;
+
+        dispQuad[3].x = 0;
+        dispQuad[3].y = display->height;
+    }
+    else
+    {
+        dispQuad[0].x = (display->width / 2) - (CV_AR_MARKER_SIZE / scale);			// Positions of Display image (not yet transposed)
+        dispQuad[0].y = (display->height / 2) - (CV_AR_MARKER_SIZE / scale);
+
+        dispQuad[1].x = (display->width / 2) + (CV_AR_MARKER_SIZE / scale);
+        dispQuad[1].y = (display->height / 2) - (CV_AR_MARKER_SIZE / scale);
+
+        dispQuad[2].x = (display->width / 2) + (CV_AR_MARKER_SIZE / scale);
+        dispQuad[2].y = (display->height / 2) + (CV_AR_MARKER_SIZE / scale);
+
+        dispQuad[3].x = (display->width / 2) - (CV_AR_MARKER_SIZE / scale);
+        dispQuad[3].y = (display->height / 2) + (CV_AR_MARKER_SIZE / scale);
+    }
+  
+    cvGetPerspectiveTransform(dispQuad, srcQuad, disp_warp_matrix);	// Caclculate the Warp Matrix to which Display Image has to be transformed
+   
+
+    // Note the jugglery to augment due to OpenCV's limiation passing two images [- Marker Img and Raw Img] of DIFFERENT sizes 
+    // while using "cvWarpPerspective".  
+
+    cvZero(neg_img);
+    cvZero(cpy_img);
+    cvWarpPerspective(display, neg_img, disp_warp_matrix);
+    cvWarpPerspective(blank, cpy_img, disp_warp_matrix);
+    
+    cvNot(cpy_img, cpy_img);
+    IplImage *mask_neg = cvCreateImage(cvSize(img->width, img->height), IPL_DEPTH_8U, 1);
+    cvCvtColor(neg_img, mask_neg, CV_RGB2GRAY);
+    cvThreshold(mask_neg, mask_neg, 1, 255, CV_THRESH_BINARY);
+    cvAnd(cpy_img, neg_img, img, mask_neg);
+    cvOr(img, neg_img, img);
+    
+    
+    // Release images
+    cvReleaseImage(&cpy_img);
+    cvReleaseImage(&neg_img);
+
+    cvReleaseMat(&disp_warp_matrix);
+
+}

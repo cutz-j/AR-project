@@ -11,14 +11,12 @@
 
 #include <string>
 #include <sstream>
-#include <iostream>
-#include <algorithm>
 #include <iomanip>
 #include <cmath>
 #include <map>
 #include <functional>
-#include <stdlib.h>
-
+#include <thread>
+#include <atomic>
 #ifndef PI
 const double PI = 3.14159265358979323846;
 #endif
@@ -905,10 +903,15 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
         row_idx++;
     }
 
-    cx1 = row_min;
-    cy1 = col_min;
+    
     cw1 = row_max - row_min;
     ch1 = col_max - col_min;
+    
+    cx2 = row_min;
+    cy2 = col_min;
+
+    cx1 = (cw1 / 2) + cx2;
+    cy1 = (ch1 / 2) + cy2;
 
 
     delete[]z_arr1;
@@ -1061,11 +1064,11 @@ void draw_pointcloud(float width, float height, glfw_state& app_state, rs2::poin
 
     // OpenGL cleanup
     glFlush();
-    glEnd();
+    //glEnd();
 
     glPopMatrix();
     glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
+    //glPopMatrix();
     glPopAttrib();
 }
 

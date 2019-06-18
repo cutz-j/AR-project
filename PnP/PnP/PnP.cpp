@@ -22,7 +22,6 @@
 #include "opencv2/calib3d/calib3d.hpp"
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/opencv.hpp"
-#include "MarkerDetection.h"
 
 // lib //
 #include <string>
@@ -31,9 +30,10 @@
 #include <cmath>
 #include <map>
 #include <functional>
-#include "c:/tensorflow1/PnP/PnP/example.hpp"
 #include <thread>
 #include <atomic>
+#include "c:/tensorflow1/PnP/PnP/example.hpp"
+#include "MarkerDetection.h"
 
 #define MARKER_WIDTH	0.146f
 #define MARKER_HEIGHT	0.146f
@@ -45,11 +45,11 @@ rect rc;
 int keyArr[350];
 int color_switch = 0;
 
-
 // pointCloud 변수 선언 //
 rs2::pointcloud pc;
 rs2::points points;
 int memSize; // bounding box crop size
+
 
 // 함수 선언 //
 void register_glfw_callbacks(window& app, glfw_state& app_state);
@@ -109,6 +109,7 @@ int main(int argc, char * argv[]) try
 
     // 구동 시작 //
     while (1) {
+        
         // RealSense API READ stage //
         data = pipe.wait_for_frames();
         color = data.get_color_frame();
@@ -132,7 +133,7 @@ int main(int argc, char * argv[]) try
         detect_num = pMapView_info[6]; // detect된 수 가져오기
         // detect num은 2개로 제한 --> 3개 이상일 시에는 2개만 가져와서 2개의 구조체에 저장 //
         if (detect_num > 2)
-            detect_num = 2;
+            detect_num = 1;
         for (int i = 0; i < detect_num; i++) {
             if (i == 0) {
                 detect1.y_min = (int)pMapView_info[0 + (i * 7)];
@@ -177,8 +178,8 @@ int main(int argc, char * argv[]) try
 
         if (detect_num == 1)
             draw_pointcloud(width, height, app_state, points, &detect1);
-        if (detect_num == 2)
-            draw_pointcloud(width, height, app_state, points, &detect1, &detect2);
+        /*if (detect_num == 2)
+            draw_pointcloud(width, height, app_state, points, &detect1, &detect2);*/
 
         glPopMatrix();
         glfwSwapBuffers(app.operator GLFWwindow *());
@@ -195,23 +196,33 @@ int main(int argc, char * argv[]) try
             //cv::Mat result; // 상하대칭변환
 
             //// pointcloud GL Capture --> opencv mat ////
-            IplImage *mask = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 1);
-            IplImage *img_bg;
-            IplImage *img_gl = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 3);
-            glReadPixels(0, 0, 1280, 720, GL_BGR_EXT, GL_UNSIGNED_BYTE, img_gl->imageData);
-            cvFlip(img_gl, img_gl);
+            IplImage *ar = cvCreateImage(cvSize(cw1, ch1), IPL_DEPTH_8U, 3);
+            IplImage *mask = cvCreateImage(cvSize(cw1, ch1), IPL_DEPTH_8U, 1);
+            IplImage *img_gl = cvCreateImage(cvSize(cw1, ch1), IPL_DEPTH_8U, 3);
+            glReadPixels(cx2, cy2, cw1, ch1, GL_BGR_EXT, GL_UNSIGNED_BYTE, img_gl->imageData);
+            cvFlip(img_gl, img_gl, -1);
             cvCvtColor(img_gl, mask, CV_RGB2GRAY);
-            cvThreshold(mask, mask, 1, 255, CV_THRESH_BINARY);
+            cvThreshold(mask, mask, 100, 255, CV_THRESH_BINARY);
+            cv::Point detect_point;
+            detect_point.x = cw1 / 2;
+            detect_point.y = 20;
+            CvFont font;
+            cvInitFont(&font, CV_FONT_HERSHEY_SIMPLEX | CV_FONT_ITALIC, 1, 1, 0, 2);
+            cvPutText(img_gl, detect1.name.c_str(), detect_point, &font, cvScalar(0, 0, 255));
+            cvFlip(img_gl, img_gl, 1);
+
+            IplImage *und;
+            IplImage *dst;
+            IplImage *img_bg;
+            
 
             printf("PointCloud Augmentation Stage\n");
-            glfwDestroyWindow(app.operator GLFWwindow *());
+            //glfwDestroyWindow(app.operator GLFWwindow *());
             // dection info 출력 //
-            // window 생성 //
-      
+            // window 생성 // 
 
             /// Streaming ///
             cv::Mat cimage; // streaming
-            cvInitFont(&_font, CV_FONT_HERSHEY_SIMPLEX, .4, .4, 0, 1, 8);
             _marker_width = MARKER_WIDTH;
             _marker_height = MARKER_HEIGHT;
             LoadCalibParams(cvSize(1280, 720));
@@ -224,29 +235,41 @@ int main(int argc, char * argv[]) try
                 cv::Mat pnp_image(cv::Size(1280, 720), CV_8UC3, (int*)color.get_data(), cv::Mat::AUTO_STEP);
                 cv::cvtColor(pnp_image, pnp_image, CV_RGB2BGR);
                 img_bg = new IplImage(pnp_image);
-                
-                IplImage *und = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 3);
-                IplImage *dst = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 3);
+
+                und = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 3);
+                dst = cvCreateImage(cvSize(1280, 720), IPL_DEPTH_8U, 3);
 
                 // 왜곡 보정 : calibration //
                 Undistort(img_bg, und);
 
+                und = new IplImage(und_mat);
+
                 // marker detection //
-                cvCopy(und, dst, 0);
+                cvCopy(img_bg, dst, 0);
                 MarkerRecog(und, dst);
 
                 // 인식 마커 출력 //
                 PrintMarkerInfo(_markers);
-                cvShowImage("OpenGlDraw", dst);
-                
-                int key = cv::waitKey(1);
-                //cvReleaseImage(&dst);
-                cvReleaseImage(&und);
+                const float ignoring_margin = 0.f;	// 원본 이미지로부터 마커 이미지로 복사하면서 무시할 테두리의 영역
+                // 추출한 마커를 저장할 이미지 상의 좌표
+               
+                if (!_markers.empty()) {
+                    
+                    cvCopy(img_gl, ar, mask);
+                    
+                    cv_ARaugmentImage(img_gl, dst, _markers[0].corner, 2);
+                    
+                }
+                cvShowImage("test", dst);
 
+                // key 'q' is revert to DETECTION MODE //
+                int key = cv::waitKey(1);
+                if (key == 113) {
+                    cv::destroyAllWindows();
+                    pMapView_signal[0] = 0;
+                    
+                }
             }
-            cvReleaseImage(&mask);
-            cvReleaseImage(&img_gl);
-            cvReleaseImage(&img_bg);
             
         }
     }

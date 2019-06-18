@@ -1,6 +1,4 @@
 #pragma once
-
-
 void LoadCalibParams (CvSize &image_size);
 void Undistort(IplImage *src, IplImage *dst);
 	
@@ -15,6 +13,9 @@ IplImage* _mapx;
 IplImage* _mapy;
 cv::Mat mapx;
 cv::Mat mapy;
+
+cv::Mat bg_mat;
+cv::Mat und_mat;
 
 float _cell_w;	// 체스판에서 한 격자의 가로방향 넓이
 float _cell_h;	// 체스판에서 한 격자의 세로방향 넓이
@@ -31,7 +32,7 @@ void LoadCalibParams(CvSize &image_size)
      //파일로 저장된 내부행렬과 왜곡 계수를 불러오기
     cv::FileStorage fs("Matrix.xml", cv::FileStorage::READ);
     fs["intrinsic"] >> intrinsic_matrix;
-    fs["distcoeffs"] >> distortion_coeffs;
+    fs["distortion"] >> distortion_coeffs;
     fs.release();
 
     // 왜곡 제거를 위한 지도를 생성
@@ -49,9 +50,9 @@ void LoadCalibParams(CvSize &image_size)
 void Undistort(IplImage *src, IplImage *dst)
 {
     // 카메라 입력영상(src)에서 왜곡을 제거한 영상(dst)을 만든다.
-    cv::Mat src_mat = cv::cvarrToMat(src);
-    cv::Mat dst_mat = cv::cvarrToMat(dst);
+    bg_mat = cv::cvarrToMat(src);
+    und_mat = cv::cvarrToMat(dst);
 
-    cv::remap(src_mat, dst_mat, mapx, mapy, 1);
+    cv::remap(bg_mat, und_mat, mapx, mapy, cv::INTER_LINEAR, cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
 }
 
