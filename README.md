@@ -8,3 +8,4 @@ Mmap - Shared Memeory (Image <--> BoundingBOX/Score/Class/DetectedNum)
 RealSense2 SDK (CPP Wrapper) <br />
 OpenCV - SolvePnP <br />
 OpenGL - PointCloud Rendering
+Mmap - Shared Memeory (Image <--> BoundingBOX/Score/Class/DetectedNum)
